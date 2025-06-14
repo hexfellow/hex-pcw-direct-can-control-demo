@@ -133,18 +133,26 @@ class XstdPcw:
         return self.canopen_id
 
     @staticmethod
-    def uint_to_float(x: int, x_min: float, x_max: float, bits: int) -> float:
-        span = x_max - x_min
-        offset = x_min
-        scale = (1 << bits) - 1
-        return x * span / scale + offset
-
-    @staticmethod
     def float_to_uint(x: float, x_min: float, x_max: float, bits: int) -> int:
         span = x_max - x_min
         offset = x_min
         scale = (1 << bits) - 1
         return int((x - offset) * scale / span)
+
+    @staticmethod
+    def float_to_i16(x: float, x_min: float, x_max: float) -> int:
+        x = max(min(x, x_max), x_min)
+        scale = 65534.0  # 32767 * 2
+        span = x_max - x_min
+        return int(((x - x_min) * scale / span) - 32767.0)
+
+    @staticmethod
+    def i16_to_float(x: int, x_min: float, x_max: float) -> float:
+        if x == -32768:
+            x = -32767
+        scale = 65534.0  # 32767 * 2
+        span = x_max - x_min
+        return x_min + (x + 32767.0) * span / scale
 
     def set_control_mode(self, modes: List[MotorControlMode]):
         self.target_control_modes = modes
@@ -171,10 +179,10 @@ class XstdPcw:
             m0_torque = struct.unpack('<H', msg.data[12:14])[0]
             m1_torque = struct.unpack('<H', msg.data[14:16])[0]
 
-            m0_speed = self.uint_to_float(m0_speed, self.speed_mapping_mins[0], self.speed_mapping_maxs[0], 16)
-            m1_speed = self.uint_to_float(m1_speed, self.speed_mapping_mins[1], self.speed_mapping_maxs[1], 16)
-            m0_torque = self.uint_to_float(m0_torque, self.torque_mapping_mins[0], self.torque_mapping_maxs[0], 16)
-            m1_torque = self.uint_to_float(m1_torque, self.torque_mapping_mins[1], self.torque_mapping_maxs[1], 16)
+            m0_speed = self.i16_to_float(m0_speed, self.speed_mapping_mins[0], self.speed_mapping_maxs[0])
+            m1_speed = self.i16_to_float(m1_speed, self.speed_mapping_mins[1], self.speed_mapping_maxs[1])
+            m0_torque = self.i16_to_float(m0_torque, self.torque_mapping_mins[0], self.torque_mapping_maxs[0])
+            m1_torque = self.i16_to_float(m1_torque, self.torque_mapping_mins[1], self.torque_mapping_maxs[1])
 
             self.read_control_modes[0] = MotorControlMode(msg.data[16])
             self.read_control_modes[1] = MotorControlMode(msg.data[17])
@@ -209,19 +217,17 @@ class XstdPcw:
                 if mode.mode_type == MotorControlMode.POSITION:
                     data.extend(struct.pack('<i', mode.value))
                 elif mode.mode_type == MotorControlMode.SPEED:
-                    speed = XstdPcw.float_to_uint(
+                    speed = XstdPcw.float_to_i16(
                         mode.value,
                         pcw.speed_mapping_mins[i],
                         pcw.speed_mapping_maxs[i],
-                        16
                     )
                     data.extend(struct.pack('<H', speed))
                 elif mode.mode_type == MotorControlMode.TORQUE:
-                    torque = XstdPcw.float_to_uint(
+                    torque = XstdPcw.float_to_i16(
                         mode.value,
                         pcw.torque_mapping_mins[i],
                         pcw.torque_mapping_maxs[i],
-                        16
                     )
                     data.extend(struct.pack('<H', torque))
                 elif mode.mode_type == MotorControlMode.MIT:
